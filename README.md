@@ -1,2 +1,2 @@
-# DecoderPNG
-simple decoder for PNG in C
+# Decoder-PNG-
+simple decoder in C
