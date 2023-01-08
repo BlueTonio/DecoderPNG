@@ -31,6 +31,7 @@ typedef struct png_IHDR{
 }png_IHDR;
 
 FILE* png_stream = NULL;
+png_file* file_data_png = NULL;
 unsigned int byteswap(unsigned int n)
 {
     unsigned int m = (n << 24);
@@ -223,7 +224,8 @@ int recon_c(int r, int c, int stride, char* recon)
     return recon[(r-1) * stride + c - BytePerPixel];
 }
 
-char* recon_func(png_IHDR *IHDRHeader , char* data){
+char* recon_func(png_IHDR *IHDRHeader , char* dataPNG)
+{
     int i = 0;
     int index_array = 0;
     int stride = BytePerPixel*IHDRHeader->width;
@@ -231,16 +233,114 @@ char* recon_func(png_IHDR *IHDRHeader , char* data){
     unsigned char filter_x, recon_x;
     char* recon = malloc(IHDRHeader->height * stride);
     for(r = 0; r< IHDRHeader->height; r++){
+        type_filter = dataPNG[i++];
+        for (c = 0; c < IHDRHeader->width; c++)
+        {
+            filter_x = dataPNG[i++];
+            if(type_filter == 0){
+                recon_x = filter_x;
+            }
+            else if(type_filter == 1){
+                recon_x =filter_x + recon_a(r,c,stride, recon);
+            }
+            else if(type_filter == 2){
+                recon_x =filter_x + recon_b(r,c,stride, recon);
+            }
+            else if (type_filter == 3){
+                recon_x =filter_x + (recon_a(r,c,stride, recon) +recon_b(r,c,stride, recon)) / 2 ;
+            }
+            else if(type_filter == 4){
+                recon_x =filter_x + path_predictor(recon_a(r,c,stride, recon),recon_b(r,c,stride, recon), recon_c(r,c,stride, recon));
+            }
+            else{
+                printf("unknown filter type: " + str(type_filter));
+                return NULL;
+            }
+            recon[index_array++] = recon_x;
+        }
         
     }
-
+    return recon;
 
 }
 
 
-int main(int argc, char **argv) //pippo è bello 
+int main(int argc, char **argv)
 {
-    FILE *pngStream;
-    PNG_open_signature_PNG(pngStream);
+    char* png_image;
+    int png_lenght;
+    int i,j;
+    png_IHDR *IHDR_png;
+    chunk_png *chunk;
+    file_data_png =(png_file*)malloc(sizeof(png_file));
+    errno_t stream_png_errno = PNG_open_signature_PNG(file_data_png);
+    char* recon= NULL;
+    if(stream_png_errno != 0){
+        printf("Error PNG convertor");
+        return stream_png_errno;
+    }
+    for (i = 0; i < 101; i++)
+    {
+        chunk = malloc(sizeof(chunk_png));
+        if(chunk_read_PNG(chunk) == -1){
+            printf("Error Chunk type: %s number %d invalid crc: %u***\n", chunk->chunk_type, i, chunk->crc_chunk);
+            for (j = 0; j < i; j++)
+            {
+                if(j == 0){
+                    free(IHDR_png);
+                }
+            }
+            free(chunk);
+            free(file_data_png);
+            return -1;
+        }
+
+        if(strstr(chunk->chunk_type, "IHDR") != NULL){
+            IHDR_png = malloc(sizeof(png_IHDR));
+            errno_t IHDR_errno = check_IHDR(IHDR_png,chunk);
+            if(IHDR_errno != 0){
+                printf("Error PNG IHDR not valid: %d", IHDR_errno);
+                free(IHDR_png);
+                free(chunk);
+                free(IHDR_errno);
+                return -1;
+            }
+        }
+        if(strstr(chunk->chunk_type, "IEND") != NULL){
+            break;
+        }
+        if(strstr(chunk->chunk_type, "IDAT") != NULL){
+            png_image= malloc(chunk->chunk_lenght);
+            png_lenght = chunk->chunk_lenght;
+            memcpy(png_image, chunk->chunk_data, chunk->chunk_lenght);
+        }
+        file_data_png->png_chunk[i] = chunk;
+        
+    }
+    for(j = 0; j <= i; j++){
+        if(j == 0){
+            free(IHDR_png);
+        }
+    }
+    free(file_data_png);
+      //uncompress PNG
+    unsigned long uncompressed_size = 600000;
+    unsigned char *uncompressed_data = malloc(uncompressed_size);
+    int result = uncompress(uncompressed_data, &uncompressed_size, png_image, png_lenght);
+    if(result != Z_OK)
+    {
+        free(uncompressed_data);
+        free(png_image);
+        printf("Error uncompressing the png file");
+        return -1;
+    }
+    else
+    {
+        free(png_image);
+    }
+    recon = recon_func(IHDR_png, uncompressed_data);
     
+    free(uncompressed_data);
+    free(recon);
+    return 0;     
 }
